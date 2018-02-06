@@ -68,29 +68,26 @@ class Service(SimpleService):
         self.family = addrinfo[0]
         self.sockaddr = addrinfo[4]
         self.sock = socket.socket(self.family, socket.SOCK_DGRAM)
-        self.rgx_sys = re.compile(
-                r'stratum=(?P<stratum>[0-9.-]+).*?'
-                r'precision=(?P<precision>[0-9.-]+).*?'
-                r'rootdelay=(?P<rootdelay>[0-9.-]+).*?'
-                r'rootdisp=(?P<rootdisp>[0-9.-]+).*?'
-                r'tc=(?P<tc>[0-9.-]+).*?'
-                r'mintc=(?P<mintc>[0-9.-]+).*?'
-                r'offset=(?P<offset>[0-9.-]+).*?'
-                r'frequency=(?P<frequency>[0-9.-]+).*?'
-                r'sys_jitter=(?P<sys_jitter>[0-9.-]+).*?'
-                r'clk_jitter=(?P<clk_jitter>[0-9.-]+).*?'
-                r'clk_wander=(?P<clk_wander>[0-9.-]+)',
-                re.DOTALL)
-
-    def check(self):
-        self.create_charts()
-
-        self.info('Plugin was started successfully')
-        return True
+        self.order = ORDER
+        self.definitions = CHARTS
+        self.regex = re.compile(
+            r'stratum=(?P<stratum>[0-9.-]+).*?'
+            r'precision=(?P<precision>[0-9.-]+).*?'
+            r'rootdelay=(?P<rootdelay>[0-9.-]+).*?'
+            r'rootdisp=(?P<rootdisp>[0-9.-]+).*?'
+            r'tc=(?P<tc>[0-9.-]+).*?'
+            r'mintc=(?P<mintc>[0-9.-]+).*?'
+            r'offset=(?P<offset>[0-9.-]+).*?'
+            r'frequency=(?P<frequency>[0-9.-]+).*?'
+            r'sys_jitter=(?P<sys_jitter>[0-9.-]+).*?'
+            r'clk_jitter=(?P<clk_jitter>[0-9.-]+).*?'
+            r'clk_wander=(?P<clk_wander>[0-9.-]+)',
+            re.DOTALL
+        )
 
     def _get_raw_data(self):
         try:
-            self.sock.settimeout(0.5)
+            self.sock.settimeout(5)
             self.sock.sendto(self.payload, self.sockaddr)
             src_addr = None,
             while src_addr[0] != self.sockaddr[0]:
@@ -107,42 +104,31 @@ class Service(SimpleService):
 
         return raw_data
 
-    def get_variables(self):
-        raw_data = self._get_raw_data()
-
-        if not raw_data:
-            return None
-
-        match = self.rgx_sys.search(raw_data)
-
-        if match is not None:
-            sys_vars = match.groupdict()
-        else:
-            return None
-
-        return sys_vars
-
     def _get_data(self):
-        data = {}
+        raw_data = self._get_raw_data()
+        data = dict()
+        try:
+            match = self.regex.search(raw_data)
+            sys_vars = match.groupdict()
 
-        sys_vars = self.get_variables()
-        if (sys_vars is not None):
-            data['offset'] = float(sys_vars['offset']) * 1000000
-            data['clk_jitter'] = float(sys_vars['clk_jitter']) * 1000
-            data['sys_jitter'] = float(sys_vars['sys_jitter']) * 1000000
-            data['frequency'] = float(sys_vars['frequency']) * 1000
-            data['clk_wander'] = float(sys_vars['clk_wander']) * 1000
-            data['rootdelay'] = float(sys_vars['rootdelay']) * 1000
-            data['rootdisp'] = float(sys_vars['rootdisp']) * 1000
-            data['stratum'] = float(sys_vars['stratum'])
-            data['tc'] = float(sys_vars['tc'])
-            data['mintc'] = float(sys_vars['mintc'])
-            data['precision'] = float(sys_vars['precision'])
+            if (sys_vars is not None):
+                data['offset'] = float(sys_vars['offset']) * 1000000
+                data['clk_jitter'] = float(sys_vars['clk_jitter']) * 1000
+                data['sys_jitter'] = float(sys_vars['sys_jitter']) * 1000000
+                data['frequency'] = float(sys_vars['frequency']) * 1000
+                data['clk_wander'] = float(sys_vars['clk_wander']) * 1000
+                data['rootdelay'] = float(sys_vars['rootdelay']) * 1000
+                data['rootdisp'] = float(sys_vars['rootdisp']) * 1000
+                data['stratum'] = float(sys_vars['stratum'])
+                data['tc'] = float(sys_vars['tc'])
+                data['mintc'] = float(sys_vars['mintc'])
+                data['precision'] = float(sys_vars['precision'])
 
+        except (ValueError, AttributeError, TypeError):
+            self.error("Invalid data received")
+            return None
+
+        if not data:
+            self.error("no data received")
+            return None
         return data
-
-    def create_charts(self):
-        self.order = ORDER[:]
-
-        # Create static charts
-        self.definitions = CHARTS

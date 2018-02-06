@@ -4,22 +4,23 @@ Netdata python module for NTP (Network Time Protocol)
 
 ## Requirements
 
-- Package `ntp` (Network Time Protocol daemon and utility programs)
-- Library `python3-ntplib` or `python-ntplib`
+- `ntp`: [Network Time Protocol daemon](http://www.ntp.org/)
 
 ## Installation
 
 Replace `<netdata>` with the **netdata** installation path, for example `/opt/netdata`:
 
-- Install the required libraries (see above)
 - Copy `python.d/ntp.chart.py` to `<netdata>/usr/libexec/netdata/python.d/`
-- Copy `python.d/python_modules/ntpq.py` to `<netdata>/usr/libexec/netdata/python.d/python_modules/`
 - Copy `conf.d/python.d/ntp.conf` to `<netdata>/etc/netdata/python.d/`
-- Copy `web/dashboard_info_custom.ntp.js` to `<netdata>/usr/share/netdata/web/`
-
-The custom dashboard can be enabled by adding the following line in `netdata.conf`:
 
 ```
-[web]
-custom dashboard_info.js = dashboard_info_custom.ntp.js
+NETDATA_ROOT=<netdata>
+git clone https://github.com/rda0/netdata-ntp.git
+cd netdata-ntp
+cp python.d/ntp.chart.py ${NETDATA_ROOT}/usr/libexec/netdata/python.d/
+cp conf.d/python.d/ntp.conf ${NETDATA_ROOT}/etc/netdata/python.d/
+chown root:root ${NETDATA_ROOT}/usr/libexec/netdata/python.d/ntp.chart.py
+chmod 644 ${NETDATA_ROOT}/usr/libexec/netdata/python.d/ntp.chart.py
+chown root:netdata ${NETDATA_ROOT}/etc/netdata/python.d/ntp.conf
+chmod 640 ${NETDATA_ROOT}/etc/netdata/python.d/ntp.conf
 ```
