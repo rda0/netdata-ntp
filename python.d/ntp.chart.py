@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Description: ntp python.d module
+# Description: ntp netdata python.d module
 # Author: Sven Mäder (rda0)
 
 from base import SimpleService
@@ -7,81 +7,58 @@ import socket
 import re
 
 # default module values
-update_every = 10
+update_every = 1
 priority = 90000
-retries = 1
+retries = 60
 
-ORDER = [
-    'frequency',
-    'offset',
-    'rootdelay',
-    'rootdisp',
-    'sys_jitter',
-    'clk_jitter',
-    'clk_wander',
-    'precision',
-    'stratum',
-    'tc',
-    'mintc'
-]
+ORDER = ['offset', 'jitter', 'frequency', 'wander', 'root', 'stratum', 'tc', 'precision']
 
 CHARTS = {
-    'frequency': {
-        'options': [None, "Frequency offset relative to hardware clock", "ppm", 'system', 'ntp.frequency', 'area'],
-        'lines': [
-            ['frequency', 'frequency', 'absolute', 1, 1000]
-        ]},
     'offset': {
         'options': [None, "Combined offset of server relative to this host", "ms", 'system', 'ntp.offset', 'area'],
         'lines': [
-            ['offset', 'offset', 'absolute', 1, 1000000]
+            ['offset', None, 'absolute', 1, 1000000]
         ]},
-    'rootdelay': {
-        'options': [None, "Total roundtrip delay to the primary reference clock", "ms", 'system', 'ntp.rootdelay', 'area'],
+    'jitter': {
+        'options': [None, "Combined system jitter and clock jitter", "ms", 'system', 'ntp.jitter', 'line'],
         'lines': [
-            ['rootdelay', 'rootdelay', 'absolute', 1, 1000]
+            ['sys_jitter', 'system', 'absolute', 1, 1000000],
+            ['clk_jitter', 'clock', 'absolute', 1, 1000]
         ]},
-    'rootdisp': {
-        'options': [None, "Total dispersion to the primary reference clock", "ms", 'system', 'ntp.rootdisp', 'area'],
+    'frequency': {
+        'options': [None, "Frequency offset relative to hardware clock", "ppm", 'frequencies', 'ntp.frequency', 'area'],
         'lines': [
-            ['rootdisp', 'rootdisp', 'absolute', 1, 1000]
+            ['frequency', None, 'absolute', 1, 1000]
         ]},
-    'sys_jitter': {
-        'options': [None, "Combined system jitter", "ms", 'system', 'ntp.sys_jitter', 'area'],
+    'wander': {
+        'options': [None, "Clock frequency wander", "ppm", 'frequencies', 'ntp.wander', 'area'],
         'lines': [
-            ['sys_jitter', 'sys_jitter', 'absolute', 1, 1000000]
+            ['clk_wander', None, 'absolute', 1, 1000]
         ]},
-    'clk_jitter': {
-        'options': [None, "Clock jitter", "ms", 'system', 'ntp.clk_jitter', 'area'],
+    'root': {
+        'options': [None, "Total roundtrip delay and dispersion to the primary reference clock", "ms", 'root', 'ntp.root', 'line'],
         'lines': [
-            ['clk_jitter', 'clk_jitter', 'absolute', 1, 1000]
-        ]},
-    'clk_wander': {
-        'options': [None, "Clock frequency wander", "ppm", 'system', 'ntp.clk_wander', 'area'],
-        'lines': [
-            ['clk_wander', 'Clk_wander', 'absolute', 1, 1000]
-        ]},
-    'precision': {
-        'options': [None, "Precision", "log2 s", 'system', 'ntp.precision', 'line'],
-        'lines': [
-            ['precision', 'precision', 'absolute', 1, 1]
+            ['rootdelay', 'delay', 'absolute', 1, 1000],
+            ['rootdisp', 'dispersion', 'absolute', 1, 1000]
         ]},
     'stratum': {
-        'options': [None, "Stratum (1-15)", "1", 'system', 'ntp.stratum', 'line'],
+        'options': [None, "Stratum (1-15)", "1", 'root', 'ntp.stratum', 'line'],
         'lines': [
-            ['stratum', 'stratum', 'absolute', 1, 1]
+            ['stratum', None, 'absolute', 1, 1]
         ]},
     'tc': {
-        'options': [None, "Time constant and poll exponent (3-17)", "log2 s", 'system', 'ntp.tc', 'line'],
+        'options': [None, "Time constant and poll exponent (3-17)", "log2 s", 'constants', 'ntp.tc', 'line'],
         'lines': [
-            ['tc', 'tc', 'absolute', 1, 1]
+            ['tc', 'current', 'absolute', 1, 1],
+            ['mintc', 'minimum', 'absolute', 1, 1]
         ]},
-    'mintc': {
-        'options': [None, "Minimum time constant (3-10)", "log2 s", 'system', 'ntp.mintc', 'line'],
+    'precision': {
+        'options': [None, "Precision", "log2 s", 'constants', 'ntp.precision', 'line'],
         'lines': [
-            ['mintc', 'mintc', 'absolute', 1, 1]
+            ['precision', 'precision', 'absolute', 1, 1]
         ]}
 }
+
 
 class Service(SimpleService):
     def __init__(self, configuration=None, name=None):
@@ -138,7 +115,7 @@ class Service(SimpleService):
 
         match = self.rgx_sys.search(raw_data)
 
-        if match != None:
+        if match is not None:
             sys_vars = match.groupdict()
         else:
             return None
@@ -149,18 +126,18 @@ class Service(SimpleService):
         data = {}
 
         sys_vars = self.get_variables()
-        if (sys_vars != None):
-            data['frequency'] = float(sys_vars['frequency']) * 1000
+        if (sys_vars is not None):
             data['offset'] = float(sys_vars['offset']) * 1000000
+            data['clk_jitter'] = float(sys_vars['clk_jitter']) * 1000
+            data['sys_jitter'] = float(sys_vars['sys_jitter']) * 1000000
+            data['frequency'] = float(sys_vars['frequency']) * 1000
+            data['clk_wander'] = float(sys_vars['clk_wander']) * 1000
             data['rootdelay'] = float(sys_vars['rootdelay']) * 1000
             data['rootdisp'] = float(sys_vars['rootdisp']) * 1000
-            data['sys_jitter'] = float(sys_vars['sys_jitter']) * 1000000
-            data['clk_jitter'] = float(sys_vars['clk_jitter']) * 1000
-            data['clk_wander'] = float(sys_vars['clk_wander']) * 1000
-            data['precision'] = float(sys_vars['precision'])
             data['stratum'] = float(sys_vars['stratum'])
             data['tc'] = float(sys_vars['tc'])
             data['mintc'] = float(sys_vars['mintc'])
+            data['precision'] = float(sys_vars['precision'])
 
         return data
 
