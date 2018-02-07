@@ -75,7 +75,6 @@ class Service(SimpleService):
         addrinfo = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_DGRAM, socket.IPPROTO_UDP)[0]
         self.family = addrinfo[0]
         self.sockaddr = addrinfo[4]
-        self.sock = socket.socket(self.family, socket.SOCK_DGRAM)
         self.order = ORDER
         self.definitions = CHARTS
         self.regex = re.compile(
@@ -95,16 +94,17 @@ class Service(SimpleService):
 
     def _get_raw_data(self):
         try:
-            self.sock.settimeout(5)
-            self.sock.sendto(self.payload, self.sockaddr)
+            sock = socket.socket(self.family, socket.SOCK_DGRAM)
+            sock.settimeout(5)
+            sock.sendto(self.payload, self.sockaddr)
             src_addr = None,
             while src_addr[0] != self.sockaddr[0]:
-                raw_data, src_addr = self.sock.recvfrom(512)
+                raw_data, src_addr = sock.recvfrom(512)
         except socket.timeout:
             self.error('Socket timeout')
-            self.sock.close()
-            self.sock = socket.socket(self.family, socket.SOCK_DGRAM)
             return None
+        finally:
+            sock.close()
 
         if not raw_data:
             self.error(''.join(['No data received from socket']))
