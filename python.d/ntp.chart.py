@@ -33,7 +33,7 @@ CHARTS = {
     'wander': {
         'options': [None, "Clock frequency wander", "ppm", 'frequencies', 'ntp.wander', 'area'],
         'lines': [
-            ['clk_wander', None, 'absolute', 1, 1000]
+            ['clk_wander', 'clock', 'absolute', 1, 1000]
         ]},
     'root': {
         'options': [None, "Total roundtrip delay and dispersion to the primary reference clock", "ms", 'root', 'ntp.root', 'line'],
@@ -124,11 +124,11 @@ class Service(SimpleService):
                 data['mintc'] = float(sys_vars['mintc'])
                 data['precision'] = float(sys_vars['precision'])
 
-        except (ValueError, AttributeError, TypeError):
+        except (KeyError, ValueError, AttributeError, TypeError):
             self.error("Invalid data received")
             return None
 
         if not data:
-            self.error("no data received")
+            self.error("No data received")
             return None
         return data
