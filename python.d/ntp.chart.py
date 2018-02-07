@@ -44,18 +44,18 @@ CHARTS = {
     'stratum': {
         'options': [None, "Stratum (1-15)", "1", 'root', 'ntp.stratum', 'line'],
         'lines': [
-            ['stratum', None, 'absolute', 1, 1]
+            ['stratum', None, 'absolute']
         ]},
     'tc': {
         'options': [None, "Time constant and poll exponent (3-17)", "log2 s", 'constants', 'ntp.tc', 'line'],
         'lines': [
-            ['tc', 'current', 'absolute', 1, 1],
-            ['mintc', 'minimum', 'absolute', 1, 1]
+            ['tc', 'current', 'absolute'],
+            ['mintc', 'minimum', 'absolute']
         ]},
     'precision': {
         'options': [None, "Precision", "log2 s", 'constants', 'ntp.precision', 'line'],
         'lines': [
-            ['precision', 'precision', 'absolute', 1, 1]
+            ['precision', 'precision', 'absolute']
         ]}
 }
 
@@ -64,7 +64,9 @@ class Service(SimpleService):
     def __init__(self, configuration=None, name=None):
         SimpleService.__init__(self, configuration=configuration, name=name)
         self.payload = '\x16\x02\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00'
-        addrinfo = socket.getaddrinfo('127.0.0.1', '123')[0]
+        self.host = 'localhost'
+        self.port = 'ntp'
+        addrinfo = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_DGRAM, socket.IPPROTO_UDP)[0]
         self.family = addrinfo[0]
         self.sockaddr = addrinfo[4]
         self.sock = socket.socket(self.family, socket.SOCK_DGRAM)
@@ -119,10 +121,10 @@ class Service(SimpleService):
                 data['clk_wander'] = float(sys_vars['clk_wander']) * 1000
                 data['rootdelay'] = float(sys_vars['rootdelay']) * 1000
                 data['rootdisp'] = float(sys_vars['rootdisp']) * 1000
-                data['stratum'] = float(sys_vars['stratum'])
-                data['tc'] = float(sys_vars['tc'])
-                data['mintc'] = float(sys_vars['mintc'])
-                data['precision'] = float(sys_vars['precision'])
+                data['stratum'] = int(sys_vars['stratum'])
+                data['tc'] = int(sys_vars['tc'])
+                data['mintc'] = int(sys_vars['mintc'])
+                data['precision'] = int(sys_vars['precision'])
 
         except (KeyError, ValueError, AttributeError, TypeError):
             self.error("Invalid data received")
