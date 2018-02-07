@@ -11,51 +11,57 @@ update_every = 1
 priority = 90000
 retries = 60
 
-ORDER = ['offset', 'jitter', 'frequency', 'wander', 'root', 'stratum', 'tc', 'precision']
+PRECISION = 1000000
+
+ORDER = ['offset', 'jitter', 'frequency', 'wander', 'rootdelay', 'rootdisp', 'stratum', 'tc', 'precision']
 
 CHARTS = {
     'offset': {
         'options': [None, "Combined offset of server relative to this host", "ms", 'system', 'ntp.offset', 'area'],
         'lines': [
-            ['offset', None, 'absolute', 1, 1000000]
+            ['offset', None, 'absolute', 1, PRECISION]
         ]},
     'jitter': {
         'options': [None, "Combined system jitter and clock jitter", "ms", 'system', 'ntp.jitter', 'line'],
         'lines': [
-            ['sys_jitter', 'system', 'absolute', 1, 1000000],
-            ['clk_jitter', 'clock', 'absolute', 1, 1000]
+            ['sys_jitter', 'system', 'absolute', 1, PRECISION],
+            ['clk_jitter', 'clock', 'absolute', 1, PRECISION]
         ]},
     'frequency': {
         'options': [None, "Frequency offset relative to hardware clock", "ppm", 'frequencies', 'ntp.frequency', 'area'],
         'lines': [
-            ['frequency', None, 'absolute', 1, 1000]
+            ['frequency', None, 'absolute', 1, PRECISION]
         ]},
     'wander': {
         'options': [None, "Clock frequency wander", "ppm", 'frequencies', 'ntp.wander', 'area'],
         'lines': [
-            ['clk_wander', 'clock', 'absolute', 1, 1000]
+            ['clk_wander', 'clock', 'absolute', 1, PRECISION]
         ]},
-    'root': {
-        'options': [None, "Total roundtrip delay and dispersion to the primary reference clock", "ms", 'root', 'ntp.root', 'line'],
+    'rootdelay': {
+        'options': [None, "Total roundtrip delay to the primary reference clock", "ms", 'root', 'ntp.rootdelay', 'area'],
         'lines': [
-            ['rootdelay', 'delay', 'absolute', 1, 1000],
-            ['rootdisp', 'dispersion', 'absolute', 1, 1000]
+            ['rootdelay', 'delay', 'absolute', 1, PRECISION]
+        ]},
+    'rootdisp': {
+        'options': [None, "Dispersion to the primary reference clock", "ms", 'root', 'ntp.rootdisp', 'area'],
+        'lines': [
+            ['rootdisp', 'dispersion', 'absolute', 1, PRECISION]
         ]},
     'stratum': {
         'options': [None, "Stratum (1-15)", "1", 'root', 'ntp.stratum', 'line'],
         'lines': [
-            ['stratum', None, 'absolute']
+            ['stratum', None, 'absolute', 1, PRECISION]
         ]},
     'tc': {
         'options': [None, "Time constant and poll exponent (3-17)", "log2 s", 'constants', 'ntp.tc', 'line'],
         'lines': [
-            ['tc', 'current', 'absolute'],
-            ['mintc', 'minimum', 'absolute']
+            ['tc', 'current', 'absolute', 1, PRECISION],
+            ['mintc', 'minimum', 'absolute', 1, PRECISION]
         ]},
     'precision': {
         'options': [None, "Precision", "log2 s", 'constants', 'ntp.precision', 'line'],
         'lines': [
-            ['precision', 'precision', 'absolute']
+            ['precision', 'precision', 'absolute', 1, PRECISION]
         ]}
 }
 
@@ -112,21 +118,10 @@ class Service(SimpleService):
         try:
             match = self.regex.search(raw_data)
             sys_vars = match.groupdict()
+            for key, value in sys_vars.items():
+                data[key] = int(float(value) * PRECISION)
 
-            if (sys_vars is not None):
-                data['offset'] = float(sys_vars['offset']) * 1000000
-                data['clk_jitter'] = float(sys_vars['clk_jitter']) * 1000
-                data['sys_jitter'] = float(sys_vars['sys_jitter']) * 1000000
-                data['frequency'] = float(sys_vars['frequency']) * 1000
-                data['clk_wander'] = float(sys_vars['clk_wander']) * 1000
-                data['rootdelay'] = float(sys_vars['rootdelay']) * 1000
-                data['rootdisp'] = float(sys_vars['rootdisp']) * 1000
-                data['stratum'] = int(sys_vars['stratum'])
-                data['tc'] = int(sys_vars['tc'])
-                data['mintc'] = int(sys_vars['mintc'])
-                data['precision'] = int(sys_vars['precision'])
-
-        except (KeyError, ValueError, AttributeError, TypeError):
+        except (ValueError, AttributeError, TypeError):
             self.error("Invalid data received")
             return None
 
