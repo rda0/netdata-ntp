@@ -22,62 +22,10 @@ OPCODES = {
 
 PRECISION = 1000000
 
-ORDER_SYSTEM = ['sys_offset', 'sys_jitter', 'sys_frequency', 'sys_wander', 'sys_rootdelay', 'sys_rootdisp', 'sys_stratum', 'sys_tc', 'sys_precision']
+ORDER = ['peer_offset', 'peer_delay', 'peer_dispersion', 'peer_jitter', 'peer_rootdelay', 'peer_rootdisp', 'peer_stratum',
+         'peer_hmode', 'peer_pmode', 'peer_hpoll', 'peer_ppoll', 'peer_precision']
 
-ORDER_PEER = ['peer_offset', 'peer_delay', 'peer_dispersion', 'peer_jitter', 'peer_rootdelay', 'peer_rootdisp', 'peer_stratum',
-              'peer_hmode', 'peer_pmode', 'peer_hpoll', 'peer_ppoll', 'peer_precision']
-
-CHARTS_SYSTEM = {
-    'sys_offset': {
-        'options': [None, "Combined offset of server relative to this host", "ms", 'system', 'ntp.sys_offset', 'area'],
-        'lines': [
-            ['offset', 'offset', 'absolute', 1, PRECISION]
-        ]},
-    'sys_jitter': {
-        'options': [None, "Combined system jitter and clock jitter", "ms", 'system', 'ntp.sys_jitter', 'line'],
-        'lines': [
-            ['sys_jitter', 'system', 'absolute', 1, PRECISION],
-            ['clk_jitter', 'clock', 'absolute', 1, PRECISION]
-        ]},
-    'sys_frequency': {
-        'options': [None, "Frequency offset relative to hardware clock", "ppm", 'system', 'ntp.sys_frequency', 'area'],
-        'lines': [
-            ['frequency', 'frequency', 'absolute', 1, PRECISION]
-        ]},
-    'sys_wander': {
-        'options': [None, "Clock frequency wander", "ppm", 'system', 'ntp.sys_wander', 'area'],
-        'lines': [
-            ['wander', 'clock', 'absolute', 1, PRECISION]
-        ]},
-    'sys_rootdelay': {
-        'options': [None, "Total roundtrip delay to the primary reference clock", "ms", 'system', 'ntp.sys_rootdelay', 'area'],
-        'lines': [
-            ['rootdelay', 'delay', 'absolute', 1, PRECISION]
-        ]},
-    'sys_rootdisp': {
-        'options': [None, "Dispersion to the primary reference clock", "ms", 'system', 'ntp.sys_rootdisp', 'area'],
-        'lines': [
-            ['rootdisp', 'dispersion', 'absolute', 1, PRECISION]
-        ]},
-    'sys_stratum': {
-        'options': [None, "Stratum (1-15)", "1", 'system', 'ntp.sys_stratum', 'line'],
-        'lines': [
-            ['stratum', 'stratum', 'absolute', 1, PRECISION]
-        ]},
-    'sys_tc': {
-        'options': [None, "Time constant and poll exponent (3-17)", "log2 s", 'system', 'ntp.sys_tc', 'line'],
-        'lines': [
-            ['tc', 'current', 'absolute', 1, PRECISION],
-            ['mintc', 'minimum', 'absolute', 1, PRECISION]
-        ]},
-    'sys_precision': {
-        'options': [None, "Precision", "log2 s", 'system', 'ntp.sys_precision', 'line'],
-        'lines': [
-            ['precision', 'precision', 'absolute', 1, PRECISION]
-        ]}
-}
-
-CHARTS_PEER = {
+CHARTS = {
     'peer_offset': {
         'options': [None, "Combined offset of server relative to this host", "ms", 'peers', 'ntp.peer_offset', 'area'],
         'lines': [
@@ -151,27 +99,14 @@ class Service(SimpleService):
         self.sockaddr = addrinfo[4]
         self.assocs = list()
         self.peers = dict()
+        self.peer_types = dict()
         self.requests = dict()
         self.index = 0
-        self.order = ORDER_SYSTEM + ORDER_PEER
-        self.definitions = CHARTS_SYSTEM
+        self.order = list()
+        self.definitions = dict()
         self.regex_srcadr = re.compile(r'srcadr=(?P<srcadr>[A-Za-z0-9.-]+)')
         self.regex_refid = re.compile(r'refid=(?P<refid>[A-Za-z]+)')
-        self.regex_systemvars = re.compile(
-            r'stratum=(?P<stratum>[0-9.-]+).*?'
-            r'precision=(?P<precision>[0-9.-]+).*?'
-            r'rootdelay=(?P<rootdelay>[0-9.-]+).*?'
-            r'rootdisp=(?P<rootdisp>[0-9.-]+).*?'
-            r'tc=(?P<tc>[0-9.-]+).*?'
-            r'mintc=(?P<mintc>[0-9.-]+).*?'
-            r'offset=(?P<offset>[0-9.-]+).*?'
-            r'frequency=(?P<frequency>[0-9.-]+).*?'
-            r'sys_jitter=(?P<sys_jitter>[0-9.-]+).*?'
-            r'clk_jitter=(?P<clk_jitter>[0-9.-]+).*?'
-            r'clk_wander=(?P<clk_wander>[0-9.-]+)',
-            re.DOTALL
-        )
-        self.regex_peervars = re.compile(
+        self.regex = re.compile(
             r'stratum=(?P<stratum>[0-9.-]+).*?'
             r'precision=(?P<precision>[0-9.-]+).*?'
             r'rootdelay=(?P<rootdelay>[0-9.-]+).*?'
@@ -238,11 +173,6 @@ class Service(SimpleService):
             return None
 
     def check(self):
-        systemvars = self.get_header(0, 'readvar')
-        if not self._get_raw_data(systemvars):
-            return None
-        self.requests[0] = systemvars
-
         readstat = self.get_header(0, 'readstat')
         assocs = self.get_assoc_ids(self._get_raw_data(readstat))
         assocs.sort()
@@ -251,7 +181,7 @@ class Service(SimpleService):
             res = self._get_raw_data(req)
             if not res:
                 continue
-            match_data = self.regex_peervars.search(res)
+            match_data = self.regex.search(res)
             if not match_data:
                 continue
             match_srcadr = self.regex_srcadr.search(res)
@@ -261,9 +191,12 @@ class Service(SimpleService):
                 if name == '0-0-0-0':
                     continue
                 if name.startswith('127-'):
-                    continue
+                    peer_type = 'local'
+                else:
+                    peer_type = 'remote'
             else:
                 name = str(assoc)
+                peer_type = 'unknown'
             match_refid = self.regex_refid.search(res)
             if match_refid:
                 refid = match_refid.groupdict()['refid'].lower()
@@ -271,16 +204,27 @@ class Service(SimpleService):
             self.assocs.append(assoc)
             self.peers[assoc] = name
             self.requests[assoc] = req
+            self.peer_types[assoc] = peer_type
 
-        charts = CHARTS_PEER
-        for chart in charts:
-            dimension_template = charts[chart]['lines'][0][0]
-            charts[chart]['lines'] = list()
-            for assoc in self.assocs:
-                dimension = '_'.join([self.peers[assoc], dimension_template])
-                line = [dimension, None, 'absolute', 1, PRECISION]
-                charts[chart]['lines'].append(line)
-        self.definitions.update(charts)
+        chart_types = list(set(self.peer_types.values()))
+        for chart_type in chart_types:
+            for chart in ORDER:
+                self.order.append('_'.join([chart_type, chart]))
+            charts = dict()
+            for chart_key in CHARTS.keys():
+                chart_name = '_'.join([chart_type, chart_key])
+                charts[chart_name] = dict(CHARTS[chart_key])
+                family = ' '.join([chart_type, charts[chart_name]['options'][3]])
+                charts[chart_name]['options'][3] = family
+                dimension_template = CHARTS[chart_key]['lines'][0][0]
+                charts[chart_name]['lines'] = list()
+                for assoc in self.assocs:
+                    if chart_type != self.peer_types[assoc]:
+                        continue
+                    dimension = '_'.join([self.peers[assoc], dimension_template])
+                    line = [dimension, None, 'absolute', 1, PRECISION]
+                    charts[chart_name]['lines'].append(line)
+            self.definitions.update(charts)
 
         if not self.assocs:
             return None
@@ -307,22 +251,10 @@ class Service(SimpleService):
 
     def _get_data(self):
         data = dict()
-
-        raw_data = self._get_raw_data(self.requests[0])
-        try:
-            match = self.regex_systemvars.search(raw_data)
-            system_vars = match.groupdict()
-            for key, value in system_vars.items():
-                data[key] = int(float(value) * PRECISION)
-
-        except (ValueError, AttributeError, TypeError):
-            self.error("Invalid data received")
-            return None
-
         #for assoc in self.assocs:
         #    raw_data = self._get_raw_data(self.requests[assoc])
         #    try:
-        #        match = self.regex_peervars.search(raw_data)
+        #        match = self.regex.search(raw_data)
         #        peer_vars = match.groupdict()
         #        for key, value in peer_vars.items():
         #            dimension = '_'.join([self.peers[assoc], key])
@@ -338,7 +270,7 @@ class Service(SimpleService):
         self.index += 1
         raw_data = self._get_raw_data(self.requests[assoc])
         try:
-            match = self.regex_peervars.search(raw_data)
+            match = self.regex.search(raw_data)
             peer_vars = match.groupdict()
             for key, value in peer_vars.items():
                 dimension = '_'.join([self.peers[assoc], key])
