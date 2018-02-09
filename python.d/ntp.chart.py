@@ -106,13 +106,6 @@ PEER_DIMENSIONS = [
     ['precision', 'Precision', 'log2 s']
 ]
 
-PEER_CHART_TEMPLATE = {
-    'options': [None, None, None, 'peers', None, 'line'],
-    'lines': None
-}
-
-PEER_DIMENSION_TEMPLATE = [None, None, 'absolute', 1, PRECISION]
-
 
 class Service(SimpleService):
     def __init__(self, configuration=None, name=None):
@@ -140,11 +133,11 @@ class Service(SimpleService):
         charts = dict()
         for dimension in PEER_DIMENSIONS:
             chart_id = '_'.join([PEER_PREFIX, dimension[0]])
-            chart_context = '.'.join(['ntp', chart_id])
-            charts[chart_id] = dict(PEER_CHART_TEMPLATE)
-            charts[chart_id]['options'][1] = dimension[1]
-            charts[chart_id]['options'][2] = dimension[2]
-            charts[chart_id]['options'][4] = chart_context
+            context = '.'.join(['ntp', chart_id])
+            title = dimension[1]
+            units = dimension[2]
+            charts[chart_id] = dict()
+            charts[chart_id]['options'] = [None, title, units, 'peers', context, 'line']
         return charts
 
     def init_charts(self):
@@ -159,8 +152,8 @@ class Service(SimpleService):
             for dimension in PEER_DIMENSIONS:
                 lines = list()
                 for peer in self.peer['ids']:
-                    line = list(PEER_DIMENSION_TEMPLATE)
-                    line[0] = '_'.join([self.peer['names'][peer], dimension[0]])
+                    unique_dimension_id = '_'.join([self.peer['names'][peer], dimension[0]])
+                    line = [unique_dimension_id, None, 'absolute', 1, PRECISION]
                     lines.append(line)
                 chart = '_'.join([PEER_PREFIX, dimension[0]])
                 self.definitions[chart]['lines'] = lines
