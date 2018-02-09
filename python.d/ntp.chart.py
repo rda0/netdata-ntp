@@ -22,10 +22,31 @@ OPCODES = {
 
 PRECISION = 1000000
 
-ORDER_SYSTEM = ['sys_offset', 'sys_jitter', 'sys_frequency', 'sys_wander', 'sys_rootdelay', 'sys_rootdisp', 'sys_stratum', 'sys_tc', 'sys_precision']
+ORDER_SYSTEM = [
+    'sys_offset',
+    'sys_jitter',
+    'sys_frequency',
+    'sys_wander',
+    'sys_rootdelay',
+    'sys_rootdisp',
+    'sys_stratum',
+    'sys_tc',
+    'sys_precision']
 
-ORDER_PEER = ['peer_offset', 'peer_delay', 'peer_dispersion', 'peer_jitter', 'peer_rootdelay', 'peer_rootdisp', 'peer_stratum',
-              'peer_hmode', 'peer_pmode', 'peer_hpoll', 'peer_ppoll', 'peer_precision']
+ORDER_PEER = [
+    'peer_offset',
+    'peer_delay',
+    'peer_dispersion',
+    'peer_jitter',
+    'peer_xleave',
+    'peer_rootdelay',
+    'peer_rootdisp',
+    'peer_stratum',
+    'peer_hmode',
+    'peer_pmode',
+    'peer_hpoll',
+    'peer_ppoll',
+    'peer_precision']
 
 CHARTS_SYSTEM = {
     'sys_offset': {
@@ -55,7 +76,7 @@ CHARTS_SYSTEM = {
             ['rootdelay', 'delay', 'absolute', 1, PRECISION]
         ]},
     'sys_rootdisp': {
-        'options': [None, "Dispersion to the primary reference clock", "ms", 'system', 'ntp.sys_rootdisp', 'area'],
+        'options': [None, "Total root dispersion to the primary reference clock", "ms", 'system', 'ntp.sys_rootdisp', 'area'],
         'lines': [
             ['rootdisp', 'dispersion', 'absolute', 1, PRECISION]
         ]},
@@ -79,32 +100,37 @@ CHARTS_SYSTEM = {
 
 CHARTS_PEER = {
     'peer_offset': {
-        'options': [None, "Combined offset of server relative to this host", "ms", 'peers', 'ntp.peer_offset', 'area'],
+        'options': [None, "Filter offset", "ms", 'peers', 'ntp.peer_offset', 'line'],
         'lines': [
             ['offset']
         ]},
     'peer_delay': {
-        'options': [None, "Total roundtrip delay", "ms", 'peers', 'ntp.peer_delay', 'area'],
+        'options': [None, "Filter delay", "ms", 'peers', 'ntp.peer_delay', 'line'],
         'lines': [
             ['delay']
         ]},
     'peer_dispersion': {
-        'options': [None, "Dispersion", "ms", 'peers', 'ntp.peer_dispersion', 'area'],
+        'options': [None, "Filter dispersion", "ms", 'peers', 'ntp.peer_dispersion', 'line'],
         'lines': [
             ['dispersion']
         ]},
     'peer_jitter': {
-        'options': [None, "Combined system jitter and clock jitter", "ms", 'peers', 'ntp.peer_jitter', 'line'],
+        'options': [None, "Filter jitter", "ms", 'peers', 'ntp.peer_jitter', 'line'],
         'lines': [
             ['jitter']
         ]},
+    'peer_xleave': {
+        'options': [None, "Interleave delay", "ms", 'peers', 'ntp.peer_xleave', 'line'],
+        'lines': [
+            ['xleave']
+        ]},
     'peer_rootdelay': {
-        'options': [None, "Total roundtrip delay to the primary reference clock", "ms", 'peers', 'ntp.peer_rootdelay', 'area'],
+        'options': [None, "Total roundtrip delay to the primary reference clock", "ms", 'peers', 'ntp.peer_rootdelay', 'line'],
         'lines': [
             ['rootdelay']
         ]},
     'peer_rootdisp': {
-        'options': [None, "Dispersion to the primary reference clock", "ms", 'peers', 'ntp.peer_rootdisp', 'area'],
+        'options': [None, "Total root dispersion to the primary reference clock", "ms", 'peers', 'ntp.peer_rootdisp', 'line'],
         'lines': [
             ['rootdisp']
         ]},
@@ -114,22 +140,22 @@ CHARTS_PEER = {
             ['stratum']
         ]},
     'peer_hmode': {
-        'options': [None, "hmode", "log2 s", 'peers', 'ntp.peer_hmode', 'line'],
+        'options': [None, "Host mode (1-6)", "1", 'peers', 'ntp.peer_hmode', 'line'],
         'lines': [
             ['hmode']
         ]},
     'peer_pmode': {
-        'options': [None, "pmode", 'peers', 'ntp.peer_pmode', 'line'],
+        'options': [None, "Peer mode (1-5)", "1", 'peers', 'ntp.peer_pmode', 'line'],
         'lines': [
             ['pmode']
         ]},
     'peer_hpoll': {
-        'options': [None, "hpoll", "log2 s", 'peers', 'ntp.peer_hpoll', 'line'],
+        'options': [None, "Host poll exponent", "log2 s", 'peers', 'ntp.peer_hpoll', 'line'],
         'lines': [
             ['hpoll']
         ]},
     'peer_ppoll': {
-        'options': [None, "ppoll", "log2 s", 'peers', 'ntp.peer_ppoll', 'line'],
+        'options': [None, "Peer poll exponent", "log2 s", 'peers', 'ntp.peer_ppoll', 'line'],
         'lines': [
             ['ppoll']
         ]},
@@ -157,35 +183,7 @@ class Service(SimpleService):
         self.definitions = CHARTS_SYSTEM
         self.regex_srcadr = re.compile(r'srcadr=(?P<srcadr>[A-Za-z0-9.-]+)')
         self.regex_refid = re.compile(r'refid=(?P<refid>[A-Za-z]+)')
-        self.regex_systemvars = re.compile(
-            r'stratum=(?P<stratum>[0-9.-]+).*?'
-            r'precision=(?P<precision>[0-9.-]+).*?'
-            r'rootdelay=(?P<rootdelay>[0-9.-]+).*?'
-            r'rootdisp=(?P<rootdisp>[0-9.-]+).*?'
-            r'tc=(?P<tc>[0-9.-]+).*?'
-            r'mintc=(?P<mintc>[0-9.-]+).*?'
-            r'offset=(?P<offset>[0-9.-]+).*?'
-            r'frequency=(?P<frequency>[0-9.-]+).*?'
-            r'sys_jitter=(?P<sys_jitter>[0-9.-]+).*?'
-            r'clk_jitter=(?P<clk_jitter>[0-9.-]+).*?'
-            r'clk_wander=(?P<clk_wander>[0-9.-]+)',
-            re.DOTALL
-        )
-        self.regex_peervars = re.compile(
-            r'stratum=(?P<stratum>[0-9.-]+).*?'
-            r'precision=(?P<precision>[0-9.-]+).*?'
-            r'rootdelay=(?P<rootdelay>[0-9.-]+).*?'
-            r'rootdisp=(?P<rootdisp>[0-9.-]+).*?'
-            r'hmode=(?P<hmode>[0-9.-]+).*?'
-            r'pmode=(?P<pmode>[0-9.-]+).*?'
-            r'hpoll=(?P<hpoll>[0-9.-]+).*?'
-            r'ppoll=(?P<ppoll>[0-9.-]+).*?'
-            r'offset=(?P<offset>[0-9.-]+).*?'
-            r'delay=(?P<delay>[0-9.-]+).*?'
-            r'dispersion=(?P<dispersion>[0-9.-]+).*?'
-            r'jitter=(?P<jitter>[0-9.-]+).*?',
-            re.DOTALL
-        )
+        self.regex_data = re.compile(r'([a-z_]+)=([0-9-]+(?:\.[0-9]+)?)(?=,)')
 
     def get_header(self, associd=0, operation='readvar'):
         """Construct the NTP Control Message header
@@ -251,7 +249,7 @@ class Service(SimpleService):
             res = self._get_raw_data(req)
             if not res:
                 continue
-            match_data = self.regex_peervars.search(res)
+            match_data = self.regex_data.findall(res)
             if not match_data:
                 continue
             match_srcadr = self.regex_srcadr.search(res)
@@ -310,27 +308,14 @@ class Service(SimpleService):
 
         raw_data = self._get_raw_data(self.requests[0])
         try:
-            match = self.regex_systemvars.search(raw_data)
-            system_vars = match.groupdict()
-            for key, value in system_vars.items():
+            data_list = self.regex_data.findall(raw_data)
+            for data_point in data_list:
+                key, value = data_point
                 data[key] = int(float(value) * PRECISION)
 
         except (ValueError, AttributeError, TypeError):
             self.error("Invalid data received")
             return None
-
-        #for assoc in self.assocs:
-        #    raw_data = self._get_raw_data(self.requests[assoc])
-        #    try:
-        #        match = self.regex_peervars.search(raw_data)
-        #        peer_vars = match.groupdict()
-        #        for key, value in peer_vars.items():
-        #            dimension = '_'.join([self.peers[assoc], key])
-        #            data[dimension] = int(float(value) * PRECISION)
-
-        #    except (ValueError, AttributeError, TypeError):
-        #        self.error("Invalid data received")
-        #        return None
 
         if self.index >= len(self.assocs):
             self.index = 0
@@ -338,9 +323,9 @@ class Service(SimpleService):
         self.index += 1
         raw_data = self._get_raw_data(self.requests[assoc])
         try:
-            match = self.regex_peervars.search(raw_data)
-            peer_vars = match.groupdict()
-            for key, value in peer_vars.items():
+            data_list = self.regex_data.findall(raw_data)
+            for data_point in data_list:
+                key, value = data_point
                 dimension = '_'.join([self.peers[assoc], key])
                 data[dimension] = int(float(value) * PRECISION)
 
