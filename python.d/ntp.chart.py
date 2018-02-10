@@ -2,10 +2,12 @@
 # Description: ntp netdata python.d module
 # Author: Sven Mäder (rda0)
 
-from base import SimpleService
 import socket
 import struct
 import re
+
+from itertools import cycle
+from base import SimpleService
 
 # default module values
 update_every = 1
@@ -107,6 +109,13 @@ PEER_DIMENSIONS = [
 ]
 
 
+class Peer(object):
+    def __init__(self, peer_id, name, request):
+        self.id = peer_id
+        self.name = name
+        self.request = request
+
+
 class Service(SimpleService):
     def __init__(self, configuration=None, name=None):
         SimpleService.__init__(self, configuration=configuration, name=name)
@@ -115,7 +124,8 @@ class Service(SimpleService):
         addrinfo = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_DGRAM)[0]
         self.family = addrinfo[0]
         self.sockaddr = addrinfo[4]
-        self.peer = None
+        self.peers = None
+        self.peer_error = 0
         self.request_systemvars = None
         self.regex_srcadr = re.compile(r'srcadr=([A-Za-z0-9.-]+)')
         self.regex_refid = re.compile(r'refid=([A-Za-z]+)')
@@ -123,62 +133,24 @@ class Service(SimpleService):
         self.order = None
         self.definitions = None
 
-    def get_peer_order(self):
-        order = list()
-        for dimension in PEER_DIMENSIONS:
-            order.append('_'.join([PEER_PREFIX, dimension[0]]))
-        return order
-
-    def get_peer_charts(self):
-        charts = dict()
-        for dimension in PEER_DIMENSIONS:
-            chart_id = '_'.join([PEER_PREFIX, dimension[0]])
-            context = '.'.join(['ntp', chart_id])
-            title = dimension[1]
-            units = dimension[2]
-            charts[chart_id] = dict()
-            charts[chart_id]['options'] = [None, title, units, 'peers', context, 'line']
-        return charts
-
-    def init_charts(self):
+    def create_charts(self):
         """
-        Creates the charts dynamically
+        Creates the charts dynamically.
+        Checks ntp for available peers.
+        Queries each peer once to get data for charts.
+        Adds all peers whith valid data.
         """
+        # Create systemvars charts
         self.order = ORDER
         self.definitions = CHARTS
-        if self.peer:
-            self.order += self.get_peer_order()
-            self.definitions.update(self.get_peer_charts())
-            for dimension in PEER_DIMENSIONS:
-                lines = list()
-                for peer in self.peer['ids']:
-                    unique_dimension_id = '_'.join([self.peer['names'][peer], dimension[0]])
-                    line = [unique_dimension_id, None, 'absolute', 1, PRECISION]
-                    lines.append(line)
-                chart = '_'.join([PEER_PREFIX, dimension[0]])
-                self.definitions[chart]['lines'] = lines
 
-    def init_peers(self):
-        """
-        Checks ntp for available peers.
-        Queries each peer once to have data for charts.
-        Adds all peers whith valid data.
-        If no valid peers found, disable peer charts.
-        """
-        # Reset peers
-        peer = dict()
-        peer['index'] = 0
-        peer['error'] = 0
-        peer['ids'] = list()
-        peer['names'] = dict()
-        peer['requests'] = dict()
-
-        # Get the peer ids
+        # Get peer ids
         readstat = self.get_header(0, 'readstat')
         peer_ids = self.get_peer_ids(self._get_raw_data(readstat))
         peer_ids.sort()
 
         # Get peer data
+        peers = list()
         for peer_id in peer_ids:
             request = self.get_header(peer_id, 'readvar')
             raw = self._get_raw_data(request)
@@ -199,14 +171,29 @@ class Service(SimpleService):
             if match_refid:
                 name = '_'.join([name, match_refid.group(1).lower()])
 
-            peer['ids'].append(peer_id)
-            peer['names'][peer_id] = name
-            peer['requests'][peer_id] = request
+            peers.append(Peer(peer_id, name, request))
 
-        if peer['ids']:
-            self.peer = peer
+        # Create peer charts
+        if peers:
+            charts = dict()
+            for dimension in PEER_DIMENSIONS:
+                chart_id = '_'.join([PEER_PREFIX, dimension[0]])
+                context = '.'.join(['ntp', chart_id])
+                title = dimension[1]
+                units = dimension[2]
+                lines = list()
+                for peer in peers:
+                    unique_dimension_id = '_'.join([peer.name, dimension[0]])
+                    line = [unique_dimension_id, None, 'absolute', 1, PRECISION]
+                    lines.append(line)
+                charts[chart_id] = dict()
+                charts[chart_id]['options'] = [None, title, units, 'peers', context, 'line']
+                charts[chart_id]['lines'] = lines
+            self.order += ['_'.join([PEER_PREFIX, d[0]]) for d in PEER_DIMENSIONS]
+            self.definitions.update(charts)
+            self.peers = cycle(peers)
         else:
-            self.peer = None
+            self.peers = None
 
     def check(self):
         """
@@ -218,8 +205,7 @@ class Service(SimpleService):
         if not self.get_data_from_raw(raw_systemvars):
             return None
 
-        self.init_peers()
-        self.init_charts()
+        self.create_charts()
 
         return True
 
@@ -234,13 +220,9 @@ class Service(SimpleService):
         raw_systemvars = self._get_raw_data(self.request_systemvars)
         data.update(self.get_data_from_raw(raw_systemvars))
 
-        if self.peer:
-            if self.peer['index'] >= len(self.peer['ids']):
-                self.peer['index'] = 0
-            peer = self.peer['ids'][self.peer['index']]
-            self.peer['index'] += 1
-
-            raw_peervars = self._get_raw_data(self.peer['requests'][peer])
+        if self.peers:
+            peer = next(self.peers)
+            raw_peervars = self._get_raw_data(peer.request)
             data.update(self.get_data_from_raw(raw_peervars, peer))
 
         if not data:
@@ -270,7 +252,7 @@ class Service(SimpleService):
 
         return raw
 
-    def get_data_from_raw(self, raw, peer=0):
+    def get_data_from_raw(self, raw, peer=None):
         """
         Extracts key=value pairs with float/integer from ntp response packet data.
         """
@@ -280,7 +262,7 @@ class Service(SimpleService):
             for data_point in data_list:
                 key, value = data_point
                 if peer:
-                    dimension = '_'.join([self.peer['names'][peer], key])
+                    dimension = '_'.join([peer.name, key])
                 else:
                     dimension = key
                 data[dimension] = int(float(value) * PRECISION)
@@ -292,11 +274,11 @@ class Service(SimpleService):
         # then wait 5 updates and re-initialize the peers and charts
         if not data and peer:
             self.error('Peer error: No data received')
-            self.peer['error'] += 1
-            if self.peer['error'] > 5:
-                self.error('Peer error count exceeded, re-initializing peers and charts.')
-                self.init_peers()
-                self.init_charts()
+            self.peer_error += 1
+            if self.peer_error > 5:
+                self.error('Peer error count exceeded, re-creating charts.')
+                self.create_charts()
+                self.peer_error = 0
                 self.create()
 
         return data
