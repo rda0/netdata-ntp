@@ -7,11 +7,11 @@ import struct
 import re
 
 from itertools import cycle
-from base import SimpleService
+from base import SocketService
 
 # default module values
 update_every = 1
-priority = 90000
+priority = 60000
 retries = 60
 
 # NTP Control Message Protocol constants
@@ -116,14 +116,13 @@ class Peer(object):
         self.request = request
 
 
-class Service(SimpleService):
+class Service(SocketService):
     def __init__(self, configuration=None, name=None):
-        SimpleService.__init__(self, configuration=configuration, name=name)
-        self.host = 'localhost'
+        SocketService.__init__(self, configuration=configuration, name=name)
+        #self.configuration = configuration
         self.port = 'ntp'
-        addrinfo = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_DGRAM)[0]
-        self.family = addrinfo[0]
-        self.sockaddr = addrinfo[4]
+        self.dgram_socket = True
+        self._raw_bytes = True
         self.peers = None
         self.peer_error = 0
         self.request_systemvars = None
@@ -145,15 +144,18 @@ class Service(SimpleService):
         self.definitions = CHARTS
 
         # Get peer ids
-        readstat = self.get_header(0, 'readstat')
-        peer_ids = self.get_peer_ids(self._get_raw_data(readstat))
-        peer_ids.sort()
+        self.request = self.get_header(0, 'readstat')
+        peer_ids = self.get_peer_ids(self._get_raw_data())
+
+        if peer_ids:
+            peer_ids.sort()
 
         # Get peer data
         peers = list()
         for peer_id in peer_ids:
             request = self.get_header(peer_id, 'readvar')
-            raw = self._get_raw_data(request)
+            self.request = request
+            raw = self._get_raw_data()
             if not raw:
                 continue
             data = self.get_data_from_raw(raw)
@@ -200,8 +202,10 @@ class Service(SimpleService):
         Checks if we can get valid systemvars.
         If not, returns None to disable module.
         """
+        self._parse_config()
         self.request_systemvars = self.get_header(0, 'readvar')
-        raw_systemvars = self._get_raw_data(self.request_systemvars)
+        self.request = self.request_systemvars
+        raw_systemvars = self._get_raw_data()
         if not self.get_data_from_raw(raw_systemvars):
             return None
 
@@ -217,41 +221,22 @@ class Service(SimpleService):
         """
         data = dict()
 
-        raw_systemvars = self._get_raw_data(self.request_systemvars)
+        self.request = self.request_systemvars
+        raw_systemvars = self._get_raw_data()
         data.update(self.get_data_from_raw(raw_systemvars))
 
         if self.peers:
             peer = next(self.peers)
-            raw_peervars = self._get_raw_data(peer.request)
+            self.request = peer.request
+            raw_peervars = self._get_raw_data()
             data.update(self.get_data_from_raw(raw_peervars, peer))
 
         if not data:
             self.error("No data received")
             return None
+
         return data
     
-    def _get_raw_data(self, request):
-        """
-        Gets data via UDP socket.
-        """
-        try:
-            sock = socket.socket(self.family, socket.SOCK_DGRAM)
-            sock.connect(self.sockaddr)
-            sock.settimeout(5)
-            sock.send(request)
-            raw = sock.recv(1024)
-        except socket.timeout:
-            self.error('Socket timeout')
-            return None
-        finally:
-            sock.close()
-
-        if not raw:
-            self.error('No data received from socket')
-            return None
-
-        return raw
-
     def get_data_from_raw(self, raw, peer=None):
         """
         Extracts key=value pairs with float/integer from ntp response packet data.
@@ -299,6 +284,7 @@ class Service(SimpleService):
         try:
             opcode = OPCODES[operation]
         except KeyError:
+            self.error('Invalid operation: {0}'.format(operation))
             return None
         version = 2
         sequence = 1
@@ -310,6 +296,7 @@ class Service(SimpleService):
                                  sequence, status, associd, offset, count)
             return header
         except struct.error:
+            self.error('error packing header: {0}'.format(struct.error))
             return None
 
     def get_peer_ids(self, res):
@@ -321,9 +308,11 @@ class Service(SimpleService):
         try:
             count = struct.unpack(HEADER_FORMAT, res[:HEADER_LEN])[6]
         except struct.error:
-            return None
+            self.error('error unpacking header: {0}'.format(struct.error))
+            return list()
         if not count:
-            return None
+            self.debug('empty data field in NTP control packet')
+            return list()
 
         data_end = HEADER_LEN + count
         data = res[HEADER_LEN:data_end]
@@ -332,4 +321,5 @@ class Service(SimpleService):
         try:
             return list(struct.unpack(data_format, data))[::2]
         except struct.error:
-            return None
+            self.error('error unpacking data: {0}'.format(struct.error))
+            return list()
