@@ -59,7 +59,7 @@ CHARTS = {
     'sys_wander': {
         'options': [None, "Clock frequency wander", "ppm", 'system', 'ntp.sys_wander', 'area'],
         'lines': [
-            ['wander', 'clock', 'absolute', 1, PRECISION]
+            ['clk_wander', 'clock', 'absolute', 1, PRECISION]
         ]},
     'sys_rootdelay': {
         'options': [None, "Total roundtrip delay to the primary reference clock", "ms", 'system', 'ntp.sys_rootdelay', 'area'],
@@ -119,18 +119,26 @@ class Peer(object):
 class Service(SocketService):
     def __init__(self, configuration=None, name=None):
         SocketService.__init__(self, configuration=configuration, name=name)
-        #self.configuration = configuration
         self.port = 'ntp'
         self.dgram_socket = True
-        self._raw_bytes = True
+        self.request_systemvars = None
         self.peers = None
         self.peer_error = 0
-        self.request_systemvars = None
         self.regex_srcadr = re.compile(r'srcadr=([A-Za-z0-9.-]+)')
-        self.regex_refid = re.compile(r'refid=([A-Za-z]+)')
+        #elf.regex_refid = re.compile(r'refid=([A-Za-z]+)')
         self.regex_data = re.compile(r'([a-z_]+)=([0-9-]+(?:\.[0-9]+)?)(?=,)')
         self.order = None
         self.definitions = None
+        try:
+            peer_filter = r'^((0\.0\.0\.0)|(' + str(self.configuration['peer_filter']) + r'))$'
+        except (KeyError, TypeError):
+            self.error('error parsing peer_filter')
+            peer_filter = r'^((0\.0\.0\.0)|(127\..*))$'
+        self.regex_peer_filter = re.compile(peer_filter)
+        try:
+            self.peer_names = bool((self.configuration['peer_names']))
+        except (KeyError, TypeError):
+            self.peer_names = True
 
     def create_charts(self):
         """
@@ -145,10 +153,19 @@ class Service(SocketService):
 
         # Get peer ids
         self.request = self.get_header(0, 'readstat')
-        peer_ids = self.get_peer_ids(self._get_raw_data())
+        peer_ids = self.get_peer_ids(self._get_raw_data_bytes())
 
         if peer_ids:
             peer_ids.sort()
+            domain = None
+            if self.peer_names:
+                try:
+                    hostname = socket.gethostname()
+                    fqdn = socket.getfqdn()
+                    if fqdn.startswith(hostname):
+                        domain = fqdn[len(hostname):]
+                except socket.error:
+                    self.error('Error getting local domain')
 
         # Get peer data
         peers = list()
@@ -164,14 +181,24 @@ class Service(SocketService):
             match_srcadr = self.regex_srcadr.search(raw)
             if not match_srcadr:
                 continue
-            name = match_srcadr.group(1).replace('.', '-')
-            if name == '0-0-0-0':
+            name = match_srcadr.group(1)
+            match_peer_filter = self.regex_peer_filter.search(name)
+            if match_peer_filter:
                 continue
-            if name.startswith('127-'):
+            if domain:
+                try:
+                    name = socket.gethostbyaddr(name)[0]
+                    if len(name) > len(domain) and name.endswith(domain):
+                        name = name[:-len(domain)]
+                except (IndexError, socket.error):
+                    self.error('Failed to reverse lookup address')
+            name = name.replace('.', '-')
+            match_peer_filter = self.regex_peer_filter.search(name)
+            if match_peer_filter:
                 continue
-            match_refid = self.regex_refid.search(raw)
-            if match_refid:
-                name = '_'.join([name, match_refid.group(1).lower()])
+            #match_refid = self.regex_refid.search(raw)
+            #if match_refid:
+            #    name = '_'.join([name, match_refid.group(1).lower()])
 
             peers.append(Peer(peer_id, name, request))
 
@@ -186,7 +213,7 @@ class Service(SocketService):
                 lines = list()
                 for peer in peers:
                     unique_dimension_id = '_'.join([peer.name, dimension[0]])
-                    line = [unique_dimension_id, None, 'absolute', 1, PRECISION]
+                    line = [unique_dimension_id, peer.name, 'absolute', 1, PRECISION]
                     lines.append(line)
                 charts[chart_id] = dict()
                 charts[chart_id]['options'] = [None, title, units, 'peers', context, 'line']
@@ -203,6 +230,7 @@ class Service(SocketService):
         If not, returns None to disable module.
         """
         self._parse_config()
+        
         self.request_systemvars = self.get_header(0, 'readvar')
         self.request = self.request_systemvars
         raw_systemvars = self._get_raw_data()
@@ -256,18 +284,70 @@ class Service(SocketService):
             return None
 
         # If peer returns no valid data, probably due to ntpd restart,
-        # then wait 5 updates and re-initialize the peers and charts
+        # then wait 10 seconds and re-initialize the peers and charts
         if not data and peer:
             self.error('Peer error: No data received')
             self.peer_error += 1
-            if self.peer_error > 5:
+            if (self.peer_error * self.update_every) >= 10:
                 self.error('Peer error count exceeded, re-creating charts.')
                 self.create_charts()
                 self.peer_error = 0
                 self.create()
 
         return data
-    
+
+    def _receive_bytes(self):
+        """
+        Receive data from socket
+        :return: bytestr
+        """
+        data = b""
+        while True:
+            self.debug('receiving response')
+            try:
+                buf = self._sock.recv(4096)
+            except Exception as error:
+                self._socket_error('failed to receive response: {0}'.format(error))
+                self._disconnect()
+                break
+
+            if buf is None or len(buf) == 0:  # handle server disconnect
+                if data == b"":
+                    self._socket_error('unexpectedly disconnected')
+                else:
+                    self.debug('server closed the connection')
+                self._disconnect()
+                break
+
+            self.debug('received data')
+            data += buf
+            if self._check_raw_data(data):
+                break
+
+        self.debug('final response: {0}'.format(data))
+        return data
+
+    def _get_raw_data_bytes(self):
+        """
+        Get raw data with low-level "socket" module.
+        :return: bytestr
+        """
+        if self._sock is None:
+            self._connect()
+            if self._sock is None:
+                return None
+
+        # Send request if it is needed
+        if not self._send():
+            return None
+
+        data = self._receive_bytes()
+
+        if not self._keep_alive:
+            self._disconnect()
+
+        return data   
+ 
     def get_header(self, associd=0, operation='readvar'):
         """
         Constructs the NTP Control Message header:

@@ -11,7 +11,6 @@ class SocketService(SimpleService):
     def __init__(self, configuration=None, name=None):
         self._sock = None
         self._keep_alive = False
-        self._raw_bytes = False
         self.host = 'localhost'
         self.port = None
         self.unix_socket = None
@@ -188,10 +187,7 @@ class SocketService(SimpleService):
                 break
 
             self.debug('received data')
-            if not self._raw_bytes:
-                data += buf.decode('utf-8', 'ignore')
-            else:
-                data += buf
+            data += buf.decode('utf-8', 'ignore')
             if self._check_raw_data(data):
                 break
 
