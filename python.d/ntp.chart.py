@@ -237,10 +237,11 @@ class Service(SocketService):
                 except (IndexError, socket.error):
                     self.error('Failed to reverse lookup address')
 
-            name = name.replace('.', '-')
             match_peer_filter = self.regex_peer_filter.search(name)
             if match_peer_filter:
                 continue
+            
+            name = name.replace('.', '-')
 
             peers.append(Peer(peer_id, name, request))
 
