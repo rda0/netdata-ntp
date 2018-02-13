@@ -125,7 +125,6 @@ class Service(SocketService):
         self.peers = None
         self.peer_error = 0
         self.regex_srcadr = re.compile(r'srcadr=([A-Za-z0-9.-]+)')
-        #elf.regex_refid = re.compile(r'refid=([A-Za-z]+)')
         self.regex_data = re.compile(r'([a-z_]+)=([0-9-]+(?:\.[0-9]+)?)(?=,)')
         self.order = None
         self.definitions = None
@@ -196,9 +195,6 @@ class Service(SocketService):
             match_peer_filter = self.regex_peer_filter.search(name)
             if match_peer_filter:
                 continue
-            #match_refid = self.regex_refid.search(raw)
-            #if match_refid:
-            #    name = '_'.join([name, match_refid.group(1).lower()])
 
             peers.append(Peer(peer_id, name, request))
 
