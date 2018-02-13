@@ -110,6 +110,9 @@ PEER_DIMENSIONS = [
 
 
 class Peer(object):
+    """
+    Class to hold peer data required in _get_data
+    """
     def __init__(self, peer_id, name, request):
         self.id = peer_id
         self.name = name
@@ -128,12 +131,14 @@ class Service(SocketService):
         self.regex_data = re.compile(r'([a-z_]+)=([0-9-]+(?:\.[0-9]+)?)(?=,)')
         self.order = None
         self.definitions = None
+
         try:
             peer_filter = r'^((0\.0\.0\.0)|(' + str(self.configuration['peer_filter']) + r'))$'
         except (KeyError, TypeError):
             self.error('error parsing peer_filter')
             peer_filter = r'^((0\.0\.0\.0)|(127\..*))$'
         self.regex_peer_filter = re.compile(peer_filter)
+
         try:
             self.peer_names = bool((self.configuration['peer_names']))
         except (KeyError, TypeError):
@@ -143,7 +148,6 @@ class Service(SocketService):
         """
         Creates the charts dynamically.
         Checks ntp for available peers.
-        Queries each peer once to get data for charts.
         Adds all peers whith valid data.
         """
         # Create systemvars charts
@@ -154,9 +158,45 @@ class Service(SocketService):
         self.request = self.get_header(0, 'readstat')
         peer_ids = self.get_peer_ids(self._get_raw_data_bytes())
 
+        # Get peers
+        peers = self.get_peers(peer_ids)
+
+        # Create peer charts
+        if peers:
+            charts = dict()
+
+            for dimension in PEER_DIMENSIONS:
+                chart_id = '_'.join([PEER_PREFIX, dimension[0]])
+                context = '.'.join(['ntp', chart_id])
+                title = dimension[1]
+                units = dimension[2]
+                lines = list()
+
+                for peer in peers:
+                    unique_dimension_id = '_'.join([peer.name, dimension[0]])
+                    line = [unique_dimension_id, peer.name, 'absolute', 1, PRECISION]
+                    lines.append(line)
+                charts[chart_id] = dict()
+                charts[chart_id]['options'] = [None, title, units, 'peers', context, 'line']
+                charts[chart_id]['lines'] = lines
+
+            self.order += ['_'.join([PEER_PREFIX, d[0]]) for d in PEER_DIMENSIONS]
+            self.definitions.update(charts)
+            self.peers = cycle(peers)
+        else:
+            self.peers = None
+
+    def get_peers(self, peer_ids):
+        """
+        Figures out the possible local domain name.
+        Queries each peer once to get data for charts.
+        Replace the peer srcadr with the possible hostname.
+        Returns all peers whith valid data.
+        """
         if peer_ids:
             peer_ids.sort()
             domain = None
+
             if self.peer_names:
                 try:
                     hostname = socket.gethostname()
@@ -168,22 +208,27 @@ class Service(SocketService):
 
         # Get peer data
         peers = list()
+
         for peer_id in peer_ids:
             request = self.get_header(peer_id, 'readvar')
             self.request = request
             raw = self._get_raw_data()
             if not raw:
                 continue
+
             data = self.get_data_from_raw(raw)
             if not data:
                 continue
+
             match_srcadr = self.regex_srcadr.search(raw)
             if not match_srcadr:
                 continue
+
             name = match_srcadr.group(1)
             match_peer_filter = self.regex_peer_filter.search(name)
             if match_peer_filter:
                 continue
+
             if domain:
                 try:
                     name = socket.gethostbyaddr(name)[0]
@@ -191,6 +236,7 @@ class Service(SocketService):
                         name = name[:-len(domain)]
                 except (IndexError, socket.error):
                     self.error('Failed to reverse lookup address')
+
             name = name.replace('.', '-')
             match_peer_filter = self.regex_peer_filter.search(name)
             if match_peer_filter:
@@ -198,27 +244,7 @@ class Service(SocketService):
 
             peers.append(Peer(peer_id, name, request))
 
-        # Create peer charts
-        if peers:
-            charts = dict()
-            for dimension in PEER_DIMENSIONS:
-                chart_id = '_'.join([PEER_PREFIX, dimension[0]])
-                context = '.'.join(['ntp', chart_id])
-                title = dimension[1]
-                units = dimension[2]
-                lines = list()
-                for peer in peers:
-                    unique_dimension_id = '_'.join([peer.name, dimension[0]])
-                    line = [unique_dimension_id, peer.name, 'absolute', 1, PRECISION]
-                    lines.append(line)
-                charts[chart_id] = dict()
-                charts[chart_id]['options'] = [None, title, units, 'peers', context, 'line']
-                charts[chart_id]['lines'] = lines
-            self.order += ['_'.join([PEER_PREFIX, d[0]]) for d in PEER_DIMENSIONS]
-            self.definitions.update(charts)
-            self.peers = cycle(peers)
-        else:
-            self.peers = None
+        return peers
 
     def check(self):
         """
@@ -226,10 +252,11 @@ class Service(SocketService):
         If not, returns None to disable module.
         """
         self._parse_config()
-        
+
         self.request_systemvars = self.get_header(0, 'readvar')
         self.request = self.request_systemvars
         raw_systemvars = self._get_raw_data()
+
         if not self.get_data_from_raw(raw_systemvars):
             return None
 
@@ -260,7 +287,7 @@ class Service(SocketService):
             return None
 
         return data
-    
+
     def get_data_from_raw(self, raw, peer=None):
         """
         Extracts key=value pairs with float/integer from ntp response packet data.
@@ -268,6 +295,7 @@ class Service(SocketService):
         data = dict()
         try:
             data_list = self.regex_data.findall(raw)
+
             for data_point in data_list:
                 key, value = data_point
                 if peer:
@@ -284,6 +312,7 @@ class Service(SocketService):
         if not data and peer:
             self.error('Peer error: No data received')
             self.peer_error += 1
+
             if (self.peer_error * self.update_every) > 10:
                 self.error('Peer error count exceeded, re-creating charts.')
                 self.create_charts()
@@ -342,8 +371,8 @@ class Service(SocketService):
         if not self._keep_alive:
             self._disconnect()
 
-        return data   
- 
+        return data
+
     def get_header(self, associd=0, operation='readvar'):
         """
         Constructs the NTP Control Message header:
