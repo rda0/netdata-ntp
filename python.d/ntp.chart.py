@@ -288,7 +288,7 @@ class Service(SocketService):
         if not data and peer:
             self.error('Peer error: No data received')
             self.peer_error += 1
-            if (self.peer_error * self.update_every) >= 10:
+            if (self.peer_error * self.update_every) > 10:
                 self.error('Peer error count exceeded, re-creating charts.')
                 self.create_charts()
                 self.peer_error = 0
